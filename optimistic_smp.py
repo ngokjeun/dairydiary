@@ -1,0 +1,341 @@
+import pandas as pd
+import pulp as pl
+from datetime import datetime
+
+
+class OptimisticSMP:
+    def __init__(self, data_path):
+        self.data_path = data_path
+        self.purchases_data = None
+        self.sales_data = None
+        self.inventory_data = None
+        self.forward_curves = None
+        self.approved_suppliers = None
+        self.freights = None
+        self.prob = None
+        self.fx_rates = {}
+
+
+    def load_data(self):
+        """
+        Load data from the data_path
+        """
+        self.purchases_data = pd.read_excel(
+            self.data_path, sheet_name='Physical Purchases')
+        self.sales_data = pd.read_excel(
+            self.data_path, sheet_name='Physical Sales')
+        self.inventory_data = pd.read_excel(
+            self.data_path, sheet_name='Physical Inventory')
+        self.forward_curves = pd.read_excel(
+            self.data_path, sheet_name='Forward Curves')
+        # TODO integrate forward prices to create MTM prices for purchases and sales, based on region
+        # create dictionary input for forward prices to be adjusted
+        self.approved_suppliers = pd.read_excel(
+            self.data_path, sheet_name='Approved Supplier List', header=1)
+        self.freights = pd.read_excel(
+            self.data_path, sheet_name='Freight Rates - Wacc - Storage ', header=1)
+        self.freights_lookup = self.freights.copy()
+        self.freights_lookup.set_index('PlaceOfDelivery', inplace=True)
+
+    def set_fx_rates(self, fx_rates):
+        if isinstance(fx_rates, dict):
+            self.fx_rates = fx_rates
+        else:
+            raise ValueError("FX rates must be provided as a dictionary.")
+
+    def add_freights(self):
+        new_rows = pd.DataFrame({'PlaceOfDelivery': [
+                                'Australia'], 'Oceania': 40, 'North America': 140, 'W-EU': 75})
+        self.freights = pd.concat([self.freights, new_rows], axis=0)
+
+    def prepare_inventory(self):
+        p = self.purchases_data[['ExternalNr', 'Deliverylinenr', 'EntityDescription', 'AlphaName',
+                                 'Region', 'DeliveryTermCode', '2ndItemNr', 'ItemName',
+                                 'Day of DateDeliverySchemeThru', 'CurrencyCode', 'Price',
+                                 'Quantity (MT)']]
+        # p = p.loc[p['ItemName'] == 'Skimmed Milk Powder']
+        self.inventory_data.loc[self.inventory_data['AlphaName']
+                                == 'Northern Pastures', 'Origin'] = 'Oceania'
+        self.inventory_data.loc[self.inventory_data['AlphaName']
+                                == 'Meadows Inc', 'Origin'] = 'Asia'
+        self.inventory_data['Origin'].replace(
+            ['New Zealand', 'Australia'], 'Oceania', inplace=True)
+        self.inventory_data.dropna(
+            subset=['AlphaName', 'ItemName'], inplace=True)
+        self.inventory_data['Region'] = self.inventory_data['Origin']
+        self.inventory_data['DeliveryTermCode'] = 'Inventory'
+        self.inventory_data['Day of DateDeliverySchemeThru'] = datetime(
+            2023, 1, 1)  # assume all inventory is available
+        self.inventory_data['CurrencyCode'] = self.inventory_data['CompanyCurrencyCode']
+        self.i = self.inventory_data[p.columns]
+        all_stocks = pd.concat([self.i, p], axis=0)
+        all_stocks = all_stocks.loc[all_stocks['ItemName']
+                                    == 'Skimmed Milk Powder']
+        all_stocks['AlphaName'] = all_stocks['AlphaName'].str.strip()
+        all_stocks['Date'] = pd.to_datetime(
+            all_stocks['Day of DateDeliverySchemeThru'], format='%Y/%m/%d')
+        
+        all_stocks['TotalQuantity'] = all_stocks.groupby(
+            ['ExternalNr', 'AlphaName', 'Region', 'DeliveryTermCode', 'ItemName', 'Date', 'CurrencyCode'])['Quantity (MT)'].transform('sum')
+        all_stocks['WeightedPrice'] = (
+            all_stocks['Price'] * all_stocks['Quantity (MT)']) / all_stocks['TotalQuantity']
+
+        final_grouped = all_stocks.groupby(['ExternalNr', 'AlphaName', 'Region', 'DeliveryTermCode', 'ItemName', 'Date', 'CurrencyCode']).agg(
+            TotalQuantity=('Quantity (MT)', 'sum'), WeightedPriceSum=('WeightedPrice', 'sum')).reset_index()
+
+        self.grouped_stocks = final_grouped.copy()
+
+    def prepare_sales(self):
+        self.sales_data['AlphaName'] = self.sales_data['Company Name'].str.strip()
+        all_sales = self.sales_data[self.i.columns].loc[self.sales_data['ItemName']
+                                                        == 'Skimmed Milk Powder']
+        # assume 0s in prices are intentional - refund for claim, etc.
+        # assume -2.9 in demand quantity is typo, should be 2.9 else it is a purchase under supply
+        all_sales.replace(-2.9, 2.9, inplace=True)
+        all_sales['Date'] = pd.to_datetime(
+            all_sales['Day of DateDeliverySchemeThru'], format='%Y/%m/%d')
+        all_sales['TotalQuantity'] = all_sales.groupby(
+            ['ExternalNr', 'AlphaName', 'Region', 'DeliveryTermCode', 'ItemName', 'Date', 'CurrencyCode'])['Quantity (MT)'].transform('sum')
+        all_sales['WeightedPrice'] = (
+            all_sales['Price'] * all_sales['Quantity (MT)']) / all_sales['TotalQuantity']
+
+        # Step 4: Group by and calculate the sum of weighted prices, and also sum quantities to handle in one go
+        self.grouped_sales = all_sales.groupby(['ExternalNr', 'AlphaName', 'Region', 'DeliveryTermCode', 'ItemName', 'Date', 'CurrencyCode']).agg(
+            TotalQuantity=('Quantity (MT)', 'sum'), WeightedPriceSum=('WeightedPrice', 'sum')).reset_index()
+
+    def rename_city_region(self):
+        self.sales_df.replace('Dalian', 'China', inplace=True)
+        self.sales_df.replace('Melbourne', 'Australia', inplace=True)
+        self.stocks_df.replace('Western Europe', 'W-EU', inplace=True)
+        self.stocks_df.replace('Asia', 'Oceania', inplace=True)
+
+    def _get_freight(self, origin, destination):
+        if destination in self.freights_lookup.index and origin in self.freights_lookup.columns:
+            return self.freights_lookup.loc[destination, origin]
+        elif destination == origin:
+            print(origin, destination)
+            return 40
+        else:
+            print(origin, destination)
+            return 0  # Return 0 or some default value if no match is found
+
+    def _create_freight_rates_dict(self):
+        self.freight_rates_dict = {}
+        for index, sale_row in self.sales_df.iterrows():
+            for _, stock_row in self.stocks_df.iterrows():
+                origin = stock_row['Region']
+                destination = sale_row['Region']
+                if origin == destination:
+
+                    print(origin, destination)
+                pair_key = (stock_row['ExternalNr'], sale_row['ExternalNr'])
+                self.freight_rates_dict[pair_key] = self._get_freight(
+                    origin, destination)
+
+    def _convert_fx(self):
+        # TODO match fx rates with fx pivot in xlsx by sale ID
+        # extra: use date column and currency code to get fx rates from fx_rates
+ 
+        if not self.fx_rates:
+            print("FX rates not set. Please set FX rates before conversion.")
+            return
+        print(self.fx_rates)
+        # Apply FX conversion
+        self.stocks_df['Price'] = self.stocks_df.apply(
+            lambda row: row['Price'] * self.fx_rates.get(row['CurrencyCode'], 1), axis=1)
+        self.sales_df['Price'] = self.sales_df.apply(
+            lambda row: row['Price'] * self.fx_rates.get(row['CurrencyCode'], 1), axis=1)
+
+        # Standardize currency code after conversion
+        self.stocks_df['CurrencyCode'] = 'USD'
+        self.sales_df['CurrencyCode'] = 'USD'
+
+    def _init_approved_flow(self):
+        approved_flows = self.approved_suppliers[['Company Name', 'Dairy Plus ', 'Meadows Inc', 'Advantage Plus',
+                                                  "Milk R'Us    ", 'Cows Inc            ', 'Northern Pastures',]]
+        # strip column names
+        approved_flows.columns = approved_flows.columns.str.strip()
+        self.approved_flow_dict = {row['Company Name']: row.drop(
+            'Company Name').to_dict() for index, row in approved_flows.iterrows()}
+
+    def prepare_for_optimization(self):
+        self.stocks_df = self.grouped_stocks.copy()
+        self.sales_df = self.grouped_sales.copy()
+        self.stocks_df['Date'] = pd.to_datetime(self.stocks_df['Date'])
+        self.sales_df['Date'] = pd.to_datetime(self.sales_df['Date'])
+
+        self.stocks_df['Quantity (MT)'] = pd.to_numeric(
+            self.stocks_df['TotalQuantity'])
+        self.sales_df['Quantity (MT)'] = pd.to_numeric(
+            self.sales_df['TotalQuantity'])
+
+        self.stocks_df['Price'] = pd.to_numeric(
+            self.stocks_df['WeightedPriceSum'])
+        self.sales_df['Price'] = pd.to_numeric(
+            self.sales_df['WeightedPriceSum'])
+
+        self.sales_df['Region'] = pd.merge(self.sales_df, self.sales_data[[
+                                           'ExternalNr', 'PlaceOfDelivery']], how='left', on='ExternalNr')['PlaceOfDelivery']
+        print(self.sales_df.sort_values(by=['ExternalNr']))
+        self.rename_city_region()
+        self._create_freight_rates_dict()
+        self._convert_fx()
+        self.purchase_prices_dict = self.stocks_df.set_index('ExternalNr')[
+            'Price'].to_dict()
+        self.sale_prices_dict = self.sales_df.set_index('ExternalNr')[
+            'Price'].to_dict()
+        self.max_qty_p_dict = self.stocks_df.set_index(
+            'ExternalNr')['Quantity (MT)'].to_dict()
+        self.demand_dict = self.sales_df.set_index(
+            'ExternalNr')['Quantity (MT)'].to_dict()
+        self._init_approved_flow()
+
+    def prepare_data(self):
+        self.add_freights()
+        self.prepare_inventory()
+        self.prepare_sales()
+        self.prepare_for_optimization()
+        self.purchases = list(self.purchase_prices_dict.keys())
+
+        self.sales = list(self.sale_prices_dict.keys())
+        self.S = self.sale_prices_dict
+        self.P = self.purchase_prices_dict
+        self.C = self.freight_rates_dict
+        self.Q = self.max_qty_p_dict
+        self.D = self.demand_dict
+
+        self.purchase_to_seller = pd.Series(
+            self.stocks_df.AlphaName.values, index=self.stocks_df.ExternalNr).to_dict()
+
+        self.sale_to_buyer = pd.Series(self.sales_df.AlphaName.values,
+                                       index=self.sales_df.ExternalNr).to_dict()
+
+    def _get_approved_sellers(self, buyer):
+        return [seller for seller, approved in self.approved_flow_dict[buyer].items() if approved == 'P']
+
+    def setup_optimization(self):
+        # unmet_demand_penalty = 100000
+        prob = pl.LpProblem("OptimisticSMP", pl.LpMaximize)
+        # Decision Variables, considering only approved seller-buyer pairs
+        X = {}
+        for i in self.purchases:
+            purchase_date = self.stocks_df.loc[self.stocks_df['ExternalNr']
+                                            == i, 'Date'].values[0]
+            seller = self.purchase_to_seller[i]
+            for j in self.sales:
+                sale_date = self.sales_df.loc[self.sales_df['ExternalNr']
+                                            == j, 'Date'].values[0]
+                buyer = self.sale_to_buyer[j]
+                if seller in self._get_approved_sellers(buyer) and purchase_date <= sale_date:
+                    X[(i, j)] = pl.LpVariable(f'X_{i}_{j}', lowBound=0)
+
+        # Objective Function
+        prob += pl.lpSum([(self.S[j] - self.P[i] - self.C[(i, j)]) * X[(i, j)]
+                          for (i, j) in X.keys()])
+        # Supply Constraints: Each inventory can be allocated fully but not exceeded.
+        for i in self.purchases:
+            prob += pl.lpSum([X[(i, j)] for j in self.sales if (i, j) in X]) <= self.Q[i], f"Supply_{i}"
+        # Demand Constraints: Each demand must be exactly met.
+        for j in self.sales:
+            prob += pl.lpSum([X[(i, j)] for i in self.purchases if (i, j) in X]) == self.D[j], f"Demand_{j}"
+        prob.solve()
+        # Printing the solution
+        if pl.LpStatus[prob.status] == 'Optimal':
+            print("Optimal Solution Found:")
+            for var in X.values():
+                if var.varValue > 0:
+                    # print seller and buyer names by extracting from sales_df or stocks_df)
+                    purchase_id_str, sale_id_str = var.name.split('_')[1:]
+                    # Convert IDs to float for dictionary lookup
+                    purchase_id = float(purchase_id_str)
+                    sale_id = float(sale_id_str)
+                    # Lookup seller and buyer names using the IDs
+                    seller_name = self.purchase_to_seller.get(
+                        purchase_id, "Unknown Seller")
+                    buyer_name = self.sale_to_buyer.get(
+                        sale_id, "Unknown Buyer")
+                    print(f"from {buyer_name} to {seller_name}")
+                    print(f"{var.name} = {var.varValue}")
+        else:
+            print("Optimal solution not found. Status:",
+                  pl.LpStatus[prob.status])
+        # Check if the problem was solved successfully
+        if prob.status == pl.LpStatusOptimal:
+            total_profit = pl.value(prob.objective)
+            print(f"Total Profit: ${total_profit:,.2f}")
+        else:
+            print("The problem does not have an optimal solution.")
+
+        self.total_profit = total_profit
+        self.X = X
+
+
+    def get_allocations_df(self):
+        detailed_allocations = []
+        unfulfilled_sales = []
+        overfulfilled_sales = []
+        # Augment dataframes with unique identifiers for each row
+        stocks_augmented = self.grouped_stocks.reset_index().rename(
+            columns={'index': 'StockUniqueID'})
+        sales_augmented = self.grouped_sales.reset_index().rename(
+            columns={'index': 'SaleUniqueID'})
+        # Iterate through each decision variable in self.X
+        for (purchase_id, sale_id), variable in self.X.items():
+            quantity = variable.varValue  # Get the allocated quantity from the decision variable
+            if quantity > 0:  # Process only allocations with a positive quantity
+                purchase_details = stocks_augmented.loc[stocks_augmented['ExternalNr']
+                                                        == purchase_id].iloc[0]
+                sale_details = sales_augmented.loc[sales_augmented['ExternalNr']
+                                                == sale_id].iloc[0]
+                detailed_allocations.append({
+                    # 'StockUniqueID': purchase_details['StockUniqueID'],
+                    'PurchaseID': purchase_id,
+                    'PurchaseAlphaName': purchase_details['AlphaName'],
+                    'PurchaseDate': purchase_details['Date'].strftime('%Y-%m-%d'),
+                    'PurchasePlaceOfDelivery': purchase_details.get('Region', 'Unknown'),
+                    'PurchaseQuantity': purchase_details['TotalQuantity'],
+                    # 'SaleUniqueID': sale_details['SaleUniqueID'],
+                    'SaleID': sale_id,
+                    'SaleAlphaName': sale_details['AlphaName'],
+                    'SaleDate': sale_details['Date'].strftime('%Y-%m-%d'),
+                    'SalePlaceOfDelivery': sale_details.get('Region', 'Unknown'),
+                    'SaleQuantity': sale_details['TotalQuantity'],
+                    'AllocatedQuantity': quantity
+                })
+        # Convert the list of dictionaries to a DataFrame for easier viewing and manipulation
+        allocations_df = pd.DataFrame(detailed_allocations)
+        # Group allocations by sales order ID and calculate the sum of allocated quantities
+        grouped_allocations = allocations_df.groupby(
+            'SaleID')['AllocatedQuantity'].sum()
+        # Iterate through each sales order to check for unfulfilled orders
+        for sale_id, total_allocated_quantity in grouped_allocations.items():
+            total_demand = allocations_df.loc[allocations_df['SaleID']
+                                            == sale_id, 'SaleQuantity'].iloc[0]
+            if total_allocated_quantity < total_demand:
+                unfulfilled_sales.append({
+                    'SaleID': sale_id,
+                    'SaleAlphaName': allocations_df.loc[allocations_df['SaleID'] == sale_id, 'SaleAlphaName'].iloc[0],
+                    'TotalDemand': total_demand,
+                    'AllocatedQuantity': total_allocated_quantity
+                })
+            elif total_allocated_quantity > total_demand + 1:
+                overfulfilled_sales.append({
+                    'SaleID': sale_id,
+                    'SaleAlphaName': allocations_df.loc[allocations_df['SaleID'] == sale_id, 'SaleAlphaName'].iloc[0],
+                    'TotalDemand': total_demand,
+                    'AllocatedQuantity': total_allocated_quantity
+                })
+
+        # Print information about unfulfilled and overfulfilled sales orders
+        if unfulfilled_sales:
+            print("Unfulfilled Sales Orders:")
+            for order in unfulfilled_sales:
+                print(f"Sale ID: {order['SaleID']}, AlphaName: {order['SaleAlphaName']}, "
+                    f"Total Demand: {order['TotalDemand']}, Allocated Quantity: {order['AllocatedQuantity']}")
+        if overfulfilled_sales:
+            print("Overfulfilled Sales Orders:")
+            for order in overfulfilled_sales:
+                print(f"Sale ID: {order['SaleID']}, AlphaName: {order['SaleAlphaName']}, "
+                    f"Total Demand: {order['TotalDemand']}, Allocated Quantity: {order['AllocatedQuantity']}")
+
+        return allocations_df, unfulfilled_sales, overfulfilled_sales
