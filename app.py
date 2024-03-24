@@ -65,6 +65,7 @@ def main():
         with st.spinner('Initiating...'):
             moneymaker = OptimisticSMP(uploaded_file)
             moneymaker.load_data()
+            moneymaker.adjust_prices_with_forward_curves()
         file_uploaded = True
     else:
         file_uploaded = False
@@ -85,7 +86,7 @@ def main():
         display_and_edit_freight_rates(moneymaker)
 
     if st.button('Run Optimisation', disabled=not file_uploaded):
-        with st.spinner('Breastfeeding...'):
+        with st.spinner('Optimizing...'):
             if 'fx_rates' in locals():
                 # Set FX rates based on user input
                 moneymaker.set_fx_rates(fx_rates)

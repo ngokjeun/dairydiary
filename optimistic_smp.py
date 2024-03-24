@@ -270,6 +270,27 @@ class OptimisticSMP:
         self.total_profit = total_profit
         self.X = X
 
+    def adjust_prices_with_forward_curves(self):
+        
+        period_to_date = {
+            'C1': '2024-01', 'C2': '2024-02', 'C3': '2024-03', 'C4': '2024-04',
+            'C5': '2024-05', 'C6': '2024-06', 'C7': '2024-07', 'C8': '2024-08',
+            'C9': '2024-09', 'C10': '2024-10', 'C11': '2024-11', 'C12': '2024-12',
+            'C13': '2025-01', 'C14': '2025-02', 'C15': '2025-03', 'C16': '2025-04',
+            'C17': '2025-05', 'C18': '2025-06', 'C19': '2025-07', 'C20': '2025-08',
+            'C21': '2025-09', 'C22': '2025-10', 'C23': '2025-11', 'C24': '2025-12'
+        }
+        for index, row in self.purchases_data.iterrows():
+            period_date = period_to_date.get(row['Period'], None)
+            if period_date:
+                matching_curve = self.future_curves[
+                    (self.future_curves['Product'] == row['Product']) &
+                    (self.future_curves['Period'] == period_date)
+                ]
+                if not matching_curve.empty:
+                    new_price = matching_curve.iloc[0]['Price']
+                    self.purchases_data.at[index, 'Price'] = new_price
+
 
     def get_allocations_df(self):
         detailed_allocations = []
