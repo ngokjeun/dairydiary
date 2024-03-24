@@ -291,7 +291,28 @@ class OptimisticSMP:
                     new_price = matching_curve.iloc[0]['Price']
                     self.purchases_data.at[index, 'Price'] = new_price
 
+    def prepare_data_mtm(self):
+        """
+        Adjust purchase prices based on MTM forward curves for specific regions.
+        """
+        if self.forward_curves is not None:
+            for index, row in self.purchases_data.iterrows():
+            
+                region = row['Region']
+                date = row['Date']
+                
+                matching_curve = self.forward_curves[
+                    (self.forward_curves['Region'] == region) & 
+                    (self.forward_curves['Date'] <= date)
+                ].sort_values(by='Date', ascending=False).head(1)
+                if not matching_curve.empty:
+                    # Assume 'Price' is the column in your forward curves containing the new price
+                    new_price = matching_curve.iloc[0]['Price']
+                    self.purchases_data.at[index, 'Price'] = new_price
+        else:
+            print("No forward curves data to adjust MTM prices.")
 
+    
     def get_allocations_df(self):
         detailed_allocations = []
         unfulfilled_sales = []

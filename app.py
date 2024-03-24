@@ -124,6 +124,33 @@ def main():
                 st.subheader('Overfulfilled Sales Orders')
                 st.dataframe(pd.DataFrame(overfulfilled_sales))
 
+    if st.button('Run MTM-based Optimisation', disabled=not file_uploaded):
+        with st.spinner('Optimizing based on MTM...'):
+            moneymaker.prepare_data_mtm()
+            moneymaker.setup_optimization()
+            allocations_df, unfulfilled_sales, overfulfilled_sales = moneymaker.get_allocations_df()
+            st.success('MTM-based Optimisation completed successfully!')
+            
+            st.subheader('MTM-based Trade Allocations')
+            allocations_table = allocations_df.reset_index(drop=True)
+            allocations_table['PurchaseID'] = allocations_table['PurchaseID'].astype(int).astype(str)
+            allocations_table['SaleID'] = allocations_table['SaleID'].astype(int).astype(str)
+            st.dataframe(allocations_table)
+
+            # Download link for MTM allocations
+            csv = allocations_df.to_csv(index=False)
+            b64 = base64.b64encode(csv.encode()).decode()
+            href = f'<a href="data:file/csv;base64,{b64}" download="mtm_trade_allocations.csv">Download MTM Trade Allocations CSV</a>'
+            st.markdown(href, unsafe_allow_html=True)
+            
+            # Display unfulfilled and overfulfilled sales orders for MTM scenario
+            if unfulfilled_sales:
+                st.subheader('Unfulfilled Sales Orders (MTM)')
+                st.dataframe(pd.DataFrame(unfulfilled_sales))
+
+            if overfulfilled_sales:
+                st.subheader('Overfulfilled Sales Orders (MTM)')
+                st.dataframe(pd.DataFrame(overfulfilled_sales))
 
 
 if __name__ == "__main__":
