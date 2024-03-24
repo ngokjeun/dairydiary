@@ -2,7 +2,6 @@ import pandas as pd
 import pulp as pl
 from datetime import datetime
 
-#test 
 
 class OptimisticSMP:
     def __init__(self, data_path):
