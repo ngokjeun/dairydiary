@@ -48,42 +48,51 @@ class OptimisticSMP:
                                 'Australia'], 'Oceania': 40, 'North America': 140, 'W-EU': 75})
         self.freights = pd.concat([self.freights, new_rows], axis=0)
 
+    def process_data(self, data_frame, item_name='Skimmed Milk Powder'):
+        """
+        Processes the given DataFrame to calculate the total and weighted average price
+        for the specified item.
+
+        Parameters:
+        - data_frame: The DataFrame to process.
+        - item_name: The name of the item to filter by. Defaults to 'Skimmed Milk Powder'.
+
+        Returns:
+        - A processed DataFrame with calculated total quantities and weighted average prices.
+        """
+        # Filter by item name
+        filtered_data = data_frame.loc[data_frame['ItemName'] == item_name]
+        filtered_data['AlphaName'] = filtered_data['AlphaName'].str.strip()
+        filtered_data['Date'] = pd.to_datetime(filtered_data['Day of DateDeliverySchemeThru'], format='%Y/%m/%d')
+        
+        # Calculate the product of price and quantity
+        filtered_data['pq'] = filtered_data['Price'] * filtered_data['Quantity (MT)']
+        
+        # Group by relevant columns and aggregate
+        final_grouped = filtered_data.groupby(['ExternalNr', 'AlphaName', 'Region', 'DeliveryTermCode', 'ItemName', 'Date', 'CurrencyCode']).agg(
+            TotalQuantity=('Quantity (MT)', 'sum'),
+            WeightedPriceSum=('pq', 'sum')  
+        ).reset_index()
+
+        # Calculate weighted average price and clean up
+        final_grouped['WeightedAveragePrice'] = final_grouped['WeightedPriceSum'] / final_grouped['TotalQuantity']
+        final_grouped.drop(columns=['WeightedPriceSum'], inplace=True)
+
+        return final_grouped
+
     def prepare_inventory(self):
         p = self.purchases_data[['ExternalNr', 'Deliverylinenr', 'EntityDescription', 'AlphaName',
-                                 'Region', 'DeliveryTermCode', '2ndItemNr', 'ItemName',
-                                 'Day of DateDeliverySchemeThru', 'CurrencyCode', 'Price',
-                                 'Quantity (MT)']]
-        # p = p.loc[p['ItemName'] == 'Skimmed Milk Powder']
-        self.inventory_data.loc[self.inventory_data['AlphaName']
-                                == 'Northern Pastures', 'Origin'] = 'Oceania'
-        self.inventory_data.loc[self.inventory_data['AlphaName']
-                                == 'Meadows Inc', 'Origin'] = 'Asia'
-        self.inventory_data['Origin'].replace(
-            ['New Zealand', 'Australia'], 'Oceania', inplace=True)
-        self.inventory_data.dropna(
-            subset=['AlphaName', 'ItemName'], inplace=True)
+                                'Region', 'DeliveryTermCode', '2ndItemNr', 'ItemName',
+                                'Day of DateDeliverySchemeThru', 'CurrencyCode', 'Price',
+                                'Quantity (MT)']]
         self.inventory_data['Region'] = self.inventory_data['Origin']
         self.inventory_data['DeliveryTermCode'] = 'Inventory'
-        self.inventory_data['Day of DateDeliverySchemeThru'] = datetime(
-            2023, 1, 1)  # assume all inventory is available
+        self.inventory_data['Day of DateDeliverySchemeThru'] = datetime(2023, 1, 1) # assume all inventory is available from 2023
         self.inventory_data['CurrencyCode'] = self.inventory_data['CompanyCurrencyCode']
         self.i = self.inventory_data[p.columns]
+
         all_stocks = pd.concat([self.i, p], axis=0)
-        all_stocks = all_stocks.loc[all_stocks['ItemName']
-                                    == 'Skimmed Milk Powder']
-        all_stocks['AlphaName'] = all_stocks['AlphaName'].str.strip()
-        all_stocks['Date'] = pd.to_datetime(
-            all_stocks['Day of DateDeliverySchemeThru'], format='%Y/%m/%d')
-        
-        all_stocks['TotalQuantity'] = all_stocks.groupby(
-            ['ExternalNr', 'AlphaName', 'Region', 'DeliveryTermCode', 'ItemName', 'Date', 'CurrencyCode'])['Quantity (MT)'].transform('sum')
-        all_stocks['WeightedPrice'] = (
-            all_stocks['Price'] * all_stocks['Quantity (MT)']) / all_stocks['TotalQuantity']
-
-        final_grouped = all_stocks.groupby(['ExternalNr', 'AlphaName', 'Region', 'DeliveryTermCode', 'ItemName', 'Date', 'CurrencyCode']).agg(
-            TotalQuantity=('Quantity (MT)', 'sum'), WeightedPriceSum=('WeightedPrice', 'sum')).reset_index()
-
-        self.grouped_stocks = final_grouped.copy()
+        self.grouped_stocks = self.process_data(all_stocks)
 
     def prepare_sales(self):
         self.sales_data['AlphaName'] = self.sales_data['Company Name'].str.strip()
@@ -92,16 +101,7 @@ class OptimisticSMP:
         # assume 0s in prices are intentional - refund for claim, etc.
         # assume -2.9 in demand quantity is typo, should be 2.9 else it is a purchase under supply
         all_sales.replace(-2.9, 2.9, inplace=True)
-        all_sales['Date'] = pd.to_datetime(
-            all_sales['Day of DateDeliverySchemeThru'], format='%Y/%m/%d')
-        all_sales['TotalQuantity'] = all_sales.groupby(
-            ['ExternalNr', 'AlphaName', 'Region', 'DeliveryTermCode', 'ItemName', 'Date', 'CurrencyCode'])['Quantity (MT)'].transform('sum')
-        all_sales['WeightedPrice'] = (
-            all_sales['Price'] * all_sales['Quantity (MT)']) / all_sales['TotalQuantity']
-
-        # Step 4: Group by and calculate the sum of weighted prices, and also sum quantities to handle in one go
-        self.grouped_sales = all_sales.groupby(['ExternalNr', 'AlphaName', 'Region', 'DeliveryTermCode', 'ItemName', 'Date', 'CurrencyCode']).agg(
-            TotalQuantity=('Quantity (MT)', 'sum'), WeightedPriceSum=('WeightedPrice', 'sum')).reset_index()
+        self.grouped_sales = self.process_data(all_sales)
 
     def rename_city_region(self):
         self.sales_df.replace('Dalian', 'China', inplace=True)
@@ -170,16 +170,16 @@ class OptimisticSMP:
             self.sales_df['TotalQuantity'])
 
         self.stocks_df['Price'] = pd.to_numeric(
-            self.stocks_df['WeightedPriceSum'])
+            self.stocks_df['WeightedAveragePrice'])
         self.sales_df['Price'] = pd.to_numeric(
-            self.sales_df['WeightedPriceSum'])
+            self.sales_df['WeightedAveragePrice'])
+        self._convert_fx()
 
         self.sales_df['Region'] = pd.merge(self.sales_df, self.sales_data[[
                                            'ExternalNr', 'PlaceOfDelivery']], how='left', on='ExternalNr')['PlaceOfDelivery']
         print(self.sales_df.sort_values(by=['ExternalNr']))
         self.rename_city_region()
         self._create_freight_rates_dict()
-        self._convert_fx()
         self.purchase_prices_dict = self.stocks_df.set_index('ExternalNr')[
             'Price'].to_dict()
         self.sale_prices_dict = self.sales_df.set_index('ExternalNr')[
@@ -215,6 +215,7 @@ class OptimisticSMP:
 
     def setup_optimization(self):
         # unmet_demand_penalty = 100000
+        print(len(self.purchases), len(self.sales))
         prob = pl.LpProblem("OptimisticSMP", pl.LpMaximize)
         # Decision Variables, considering only approved seller-buyer pairs
         X = {}
@@ -275,39 +276,38 @@ class OptimisticSMP:
         unfulfilled_sales = []
         overfulfilled_sales = []
         # Augment dataframes with unique identifiers for each row
-        stocks_augmented = self.grouped_stocks.reset_index().rename(
-            columns={'index': 'StockUniqueID'})
-        sales_augmented = self.grouped_sales.reset_index().rename(
-            columns={'index': 'SaleUniqueID'})
+        stocks_augmented = self.stocks_df.reset_index().rename(columns={'index': 'StockUniqueID'})
+        sales_augmented = self.sales_df.reset_index().rename(columns={'index': 'SaleUniqueID'})
+        
         # Iterate through each decision variable in self.X
         for (purchase_id, sale_id), variable in self.X.items():
             quantity = variable.varValue  # Get the allocated quantity from the decision variable
             if quantity > 0:  # Process only allocations with a positive quantity
-                purchase_details = stocks_augmented.loc[stocks_augmented['ExternalNr']
-                                                        == purchase_id].iloc[0]
-                sale_details = sales_augmented.loc[sales_augmented['ExternalNr']
-                                                == sale_id].iloc[0]
+                purchase_details = stocks_augmented.loc[stocks_augmented['ExternalNr'] == purchase_id].iloc[0]
+                sale_details = sales_augmented.loc[sales_augmented['ExternalNr'] == sale_id].iloc[0]
+                # import streamlit as st
+                # st.write(purchase_details)
                 detailed_allocations.append({
-                    # 'StockUniqueID': purchase_details['StockUniqueID'],
                     'PurchaseID': purchase_id,
                     'PurchaseAlphaName': purchase_details['AlphaName'],
                     'PurchaseDate': purchase_details['Date'].strftime('%Y-%m-%d'),
                     'PurchasePlaceOfDelivery': purchase_details.get('Region', 'Unknown'),
                     'PurchaseQuantity': purchase_details['TotalQuantity'],
-                    # 'SaleUniqueID': sale_details['SaleUniqueID'],
+                    'PurchaseWeightedAveragePrice': f"{purchase_details['Price']:,.2f}",  
+                    
                     'SaleID': sale_id,
                     'SaleAlphaName': sale_details['AlphaName'],
                     'SaleDate': sale_details['Date'].strftime('%Y-%m-%d'),
                     'SalePlaceOfDelivery': sale_details.get('Region', 'Unknown'),
                     'SaleQuantity': sale_details['TotalQuantity'],
+                    'SaleWeightedAveragePrice': f"{sale_details['Price']:,.2f}",  
+                    
                     'AllocatedQuantity': quantity
                 })
-        # Convert the list of dictionaries to a DataFrame for easier viewing and manipulation
+        
         allocations_df = pd.DataFrame(detailed_allocations)
-        # Group allocations by sales order ID and calculate the sum of allocated quantities
         grouped_allocations = allocations_df.groupby(
             'SaleID')['AllocatedQuantity'].sum()
-        # Iterate through each sales order to check for unfulfilled orders
         for sale_id, total_allocated_quantity in grouped_allocations.items():
             total_demand = allocations_df.loc[allocations_df['SaleID']
                                             == sale_id, 'SaleQuantity'].iloc[0]
