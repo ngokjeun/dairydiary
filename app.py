@@ -104,6 +104,15 @@ def main():
                 int).astype(str)
             st.dataframe(allocations_table)
 
+
+            # Download link for allocations
+            csv = allocations_df.to_csv(index=False)
+            # Encode CSV string to base64
+            b64 = base64.b64encode(csv.encode()).decode()
+            href = f'<a href="data:file/csv;base64,{b64}" download="trade_allocations.csv">Download Trade Allocations CSV</a>'
+            st.markdown(href, unsafe_allow_html=True)
+            st.header(f'Max Possible Profit (indicated prices): $ {moneymaker.total_profit:,.2f}')
+            st.markdown('---')
             # Display underfulfilled sales orders
             if unfulfilled_sales:
                 st.subheader('Unfulfilled Sales Orders')
@@ -113,14 +122,6 @@ def main():
             if overfulfilled_sales:
                 st.subheader('Overfulfilled Sales Orders')
                 st.dataframe(pd.DataFrame(overfulfilled_sales))
-
-            # Download link for allocations
-            csv = allocations_df.to_csv(index=False)
-            # Encode CSV string to base64
-            b64 = base64.b64encode(csv.encode()).decode()
-            href = f'<a href="data:file/csv;base64,{b64}" download="trade_allocations.csv">Download Trade Allocations CSV</a>'
-            st.markdown(href, unsafe_allow_html=True)
-            st.header(f'Max Possible Profit (indicated prices): $ {moneymaker.total_profit:,.2f}')
 
 
 
