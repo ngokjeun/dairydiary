@@ -28,8 +28,6 @@ class OptimisticSMP:
             self.data_path, sheet_name='Physical Inventory')
         self.forward_curves = pd.read_excel(
             self.data_path, sheet_name='Forward Curves')
-        # TODO integrate forward prices to create MTM prices for purchases and sales, based on region
-        # create dictionary input for forward prices to be adjusted
         self.approved_suppliers = pd.read_excel(
             self.data_path, sheet_name='Approved Supplier List', header=1)
         self.freights = pd.read_excel(

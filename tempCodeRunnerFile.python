@@ -1,0 +1,24 @@
+from pulp import *
+
+# Create a simple LP problem
+prob = LpProblem("My Problem", LpMaximize)
+
+# Add variables
+x = LpVariable("x", lowBound=0)
+y = LpVariable("y", lowBound=0)
+
+# Set objective function
+prob += x + y
+
+# Add constraints
+prob += x + 2*y <= 15
+prob += -x + y <= 4
+
+# Solve the problem
+prob.solve()
+
+# Print results
+print(f"Status: {LpStatus[prob.status]}")
+for v in prob.variables():
+    print(f"{v.name} = {v.varValue}")
+print(f"Objective value: {value(prob.objective)}")
