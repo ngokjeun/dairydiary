@@ -40,13 +40,71 @@ def display_and_edit_freight_rates(moneymaker):
         st.sidebar.error(
             "Invalid JSON format. Please provide valid JSON data.")
         return
+    
+
+def display_and_edit_country_region_mappings(moneymaker):
+    st.sidebar.header("Edit Country-Region Mappings for FWD Curves")
+    default_mappings = {
+        "Indonesia": "Oceania",
+        "Saudi Arabia": "Oceania",
+        "Philippines": "Oceania",
+        "China": "Oceania",
+        "Australia": "Oceania",
+        "Asia": "Oceania",
+        "North America": "US",
+        "Western Europe": 'W-EU',
+        "Middle east": "Oceania",
+    }
+
+    mappings_json = st.sidebar.text_area("Edit Country-Region Mappings (JSON)", json.dumps(
+        default_mappings, indent=4), height=200)
+    try:
+        mappings_dict = json.loads(mappings_json)
+        moneymaker.country_region_mappings = mappings_dict
+        st.sidebar.success("Mappings updated successfully.")
+    except json.JSONDecodeError as e:
+        st.sidebar.error(
+            f"Invalid JSON format: {e.msg} at line {e.lineno}, column {e.colno}. Please provide valid JSON data.")
+
+
+def display_and_edit_forward_curves(moneymaker):
+    st.sidebar.header("Check Forward Curves for SMP MH")
+    forward_curves_for_editing = moneymaker.forward_curves_filtered.copy()
+
+    # 2. Format 'Period' column for display (%b-%Y)
+    forward_curves_for_editing['Period'] = pd.to_datetime(
+        forward_curves_for_editing['Period']
+    ).dt.strftime('%b-%Y')    
+
+    st.sidebar.dataframe(forward_curves_for_editing)
+    # st.sidebar.header("Edit Forward Curves for SMP MH")
+
+    # edited_curves_json = st.sidebar.text_area("Edit Forward Curves (JSON)", moneymaker.default_curves_json, height=200)
+    # try:
+
+    #     edited_curves_dict = json.loads(edited_curves_json)
+    #     edited_forward_curves = pd.read_json(json.dumps(edited_curves_dict), orient='split')
+        
+    #     moneymaker.forward_curves_filtered = edited_forward_curves
+    #     st.sidebar.success("Forward curves updated successfully.")
+    # except json.JSONDecodeError as e:
+    #     st.sidebar.error(f"Invalid JSON format: {e.msg} at line {e.lineno}, column {e.colno}. Please provide valid JSON data.")
+    # except Exception as e:
+    #     st.sidebar.error(f"An error occurred: {str(e)}")
+
 
 def main():
+    optimised = False
+
     st.set_page_config(layout="wide", page_icon='🍼')
     st.markdown(
         "<h1 style='text-align: center; color: white;'>Dairy Diary 🐮</h1>",
         unsafe_allow_html=True,
     )
+    if 'file_uploaded' not in st.session_state:
+        st.session_state.file_uploaded = False
+    if 'optimised' not in st.session_state:
+        st.session_state.optimised = False
 
     hide_streamlit_style = """
             <style>
@@ -65,6 +123,7 @@ def main():
         with st.spinner('Initiating...'):
             moneymaker = OptimisticSMP(uploaded_file)
             moneymaker.load_data()
+            # display_forward_curves(moneymaker)
         file_uploaded = True
     else:
         file_uploaded = False
@@ -80,12 +139,26 @@ def main():
     for currency in currencies:
         default_rate = spot_rates.get(currency, 1.0)
         fx_rates[currency] = st.sidebar.number_input(
-            f"{currency}", value=default_rate, format="%.5f")
+            f"{currency}USD", value=default_rate, format="%.5f")
+    if st.sidebar.checkbox('Use FX Pivot Transacted Rates', value=True) and file_uploaded:
+        st.sidebar.caption('Note: Rates available in the data file will be used, remaining use spot')
+        moneymaker.past_fx = True
+        # pass
+    if st.sidebar.checkbox('Use Forward Curves for Purchase, Sales Prices', value=False):
+        st.sidebar.caption('Note: Historical prices will be used for old trades, future prices will be MTM')
+        moneymaker.MTM_prices = True
+
+
+
     if uploaded_file is not None:
         display_and_edit_freight_rates(moneymaker)
+        display_and_edit_country_region_mappings(moneymaker)
+        # moneymaker.display_editable_forward_curves()
+        display_and_edit_forward_curves(moneymaker)
+
 
     if st.button('Run Optimisation', disabled=not file_uploaded):
-        with st.spinner('Breastfeeding...'):
+        with st.spinner('Optimising...'):
             if 'fx_rates' in locals():
                 # Set FX rates based on user input
                 moneymaker.set_fx_rates(fx_rates)
@@ -118,10 +191,10 @@ def main():
                 st.subheader('Unfulfilled Sales Orders')
                 st.dataframe(pd.DataFrame(unfulfilled_sales))
 
-            # Display overfulfilled sales orders
-            if overfulfilled_sales:
-                st.subheader('Overfulfilled Sales Orders')
-                st.dataframe(pd.DataFrame(overfulfilled_sales))
+            # # Display overfulfilled sales orders
+            # if overfulfilled_sales:
+            #     st.subheader('Overfulfilled Sales Orders')
+            #     st.dataframe(pd.DataFrame(overfulfilled_sales))
 
 
 
