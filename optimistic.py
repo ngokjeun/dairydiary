@@ -573,7 +573,7 @@ class OptimisticSMP:
                 value=values,
             ))])
 
-        fig.update_layout(title_text=title, font_size=10, width=600)
+        fig.update_layout(title_text=title, font_size=10, width=550)
         st.plotly_chart(fig)
 
     def plot_allocation_trends(self):
