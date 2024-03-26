@@ -1,10 +1,11 @@
 import pandas as pd
 import streamlit as st
 import yfinance as yf
-from optimistic_smp import OptimisticSMP
+from optimistic import OptimisticSMP
 import base64
 from datetime import datetime, timedelta
 import json
+import numpy as np
 
 # Function to fetch spot rates from Yahoo Finance
 
@@ -26,34 +27,30 @@ def get_spot_rates():
 
 def display_and_edit_freight_rates(moneymaker):
     st.sidebar.header("Edit Freight Rates")
-    default_freight_rates = moneymaker.freights_lookup.to_dict()
+    freight_rates_json = st.sidebar.text_area(
+        "Edit Freight Rates (JSON)", json.dumps(moneymaker.freight_rates, indent=4), height=300)
 
-    # Display a text area for users to input JSON data
-    freight_rates_json = st.sidebar.text_area("Edit Freight Rates (JSON)", json.dumps(
-        default_freight_rates, indent=4), height=200)
-
-    # Parse the JSON input
     try:
         freight_rates_dict = json.loads(freight_rates_json)
-        moneymaker.freights_lookup = pd.DataFrame(freight_rates_dict)
+        moneymaker.freight_rates = freight_rates_dict
+        # st.write("Freight rates updated successfully.")
     except json.JSONDecodeError:
         st.sidebar.error(
             "Invalid JSON format. Please provide valid JSON data.")
-        return
-    
+
 
 def display_and_edit_country_region_mappings(moneymaker):
     st.sidebar.header("Edit Country-Region Mappings for FWD Curves")
     default_mappings = {
-        "Indonesia": "Oceania",
-        "Saudi Arabia": "Oceania",
-        "Philippines": "Oceania",
-        "China": "Oceania",
+        "Indonesia": "Asia",
+        "Saudi Arabia": "Asia",
+        "Philippines": "Asia",
+        "China": "Asia",
         "Australia": "Oceania",
-        "Asia": "Oceania",
+        "Asia": "Asia",
         "North America": "US",
         "Western Europe": 'W-EU',
-        "Middle east": "Oceania",
+        "Middle east": "Asia",
     }
 
     mappings_json = st.sidebar.text_area("Edit Country-Region Mappings (JSON)", json.dumps(
@@ -68,15 +65,18 @@ def display_and_edit_country_region_mappings(moneymaker):
 
 
 def display_and_edit_forward_curves(moneymaker):
-    st.sidebar.header("Check Forward Curves for SMP MH")
+    st.sidebar.header("Edit Forward Curves for SMP MH")
+    st.sidebar.caption(
+        "Note: Asia curves absent; copied from Oceania for interim.")
     forward_curves_for_editing = moneymaker.forward_curves_filtered.copy()
 
     # 2. Format 'Period' column for display (%b-%Y)
     forward_curves_for_editing['Period'] = pd.to_datetime(
         forward_curves_for_editing['Period']
-    ).dt.strftime('%b-%Y')    
+    ).dt.strftime('%b-%Y')
 
-    forward_curves_for_editing = st.sidebar.data_editor(forward_curves_for_editing)
+    forward_curves_for_editing = st.sidebar.data_editor(
+        forward_curves_for_editing)
     moneymaker.forward_curves_filtered = forward_curves_for_editing
     # st.sidebar.header("Edit Forward Curves for SMP MH")
 
@@ -97,7 +97,10 @@ def display_and_edit_forward_curves(moneymaker):
 def main():
     optimised = False
 
-    st.set_page_config(layout="wide", page_icon='🍼')
+    st.set_page_config(layout="wide", page_title="Dairy Diary", page_icon='sticker.png')
+    st.sidebar.caption(
+        "Note: When editing JSON, curly quotes will cause an error. Use straight quotes.")
+
     st.markdown(
         "<h1 style='text-align: center; color: white;'>Dairy Diary 🐮</h1>",
         unsafe_allow_html=True,
@@ -121,9 +124,8 @@ def main():
 
     if uploaded_file is not None:
         # Assuming the uploaded file is saved temporarily
-        with st.spinner('Initiating...'):
+        with st.spinner('Initialising...'):
             moneymaker = OptimisticSMP(uploaded_file)
-            moneymaker.load_data()
             # display_forward_curves(moneymaker)
         file_uploaded = True
     else:
@@ -133,7 +135,8 @@ def main():
     spot_rates = get_spot_rates()
 
     # if st.sidebar.checkbox('Show FX Rates', value=True):    
-    st.sidebar.header("Set FX Rates: Spot Default")
+    st.sidebar.header("Set FX Rates")
+    st.sidebar.caption("Note: Default rates are current spot rates from Yahoo Finance")
     fx_rates={}
     fx_rates['USD'] = 1.0
     currencies = ['EUR', 'CNY', 'AUD']
@@ -141,6 +144,7 @@ def main():
         default_rate = spot_rates.get(currency, 1.0)
         fx_rates[currency] = st.sidebar.number_input(
             f"{currency}USD", value=default_rate, format="%.5f")
+ 
     if st.sidebar.checkbox('Use FX Pivot Transacted Rates', value=True) and file_uploaded:
         st.sidebar.caption('Note: Rates available in the data file will be used, remaining use spot')
         moneymaker.past_fx = True
@@ -150,19 +154,17 @@ def main():
         moneymaker.MTM_prices = True
 
 
-
     if uploaded_file is not None:
         display_and_edit_freight_rates(moneymaker)
         display_and_edit_country_region_mappings(moneymaker)
         # moneymaker.display_editable_forward_curves()
         display_and_edit_forward_curves(moneymaker)
 
-
     if st.button('Run Optimisation', disabled=not file_uploaded):
         with st.spinner('Optimising...'):
             if 'fx_rates' in locals():
                 # Set FX rates based on user input
-                moneymaker.set_fx_rates(fx_rates)
+                moneymaker.fx_rates = fx_rates
 
             moneymaker.prepare_data()
             moneymaker.setup_optimization()
@@ -190,12 +192,17 @@ def main():
             b64 = base64.b64encode(csv.encode()).decode()
             href = f'<a href="data:file/csv;base64,{b64}" download="trade_allocations.csv">Download Trade Allocations CSV</a>'
             st.markdown(href, unsafe_allow_html=True)
-            st.header(f'Max Possible Profit (indicated prices): $ {moneymaker.total_profit:,.2f}')
+            if moneymaker.MTM_prices:
+                st.header(f'Max Possible Profit (MTM prices): $ {moneymaker.total_profit:,.2f}')
+            else:
+                st.header(f'Max Possible Profit (indicated prices): $ {moneymaker.total_profit:,.2f}')
             st.markdown('---')
             # Display underfulfilled sales orders
             if unfulfilled_sales:
                 st.subheader('Unfulfilled Sales Orders')
                 st.dataframe(pd.DataFrame(unfulfilled_sales))
+
+            st.write(moneymaker.forward_curves_filtered)
 
             # # Display overfulfilled sales orders
             # if overfulfilled_sales:
