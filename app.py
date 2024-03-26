@@ -76,7 +76,8 @@ def display_and_edit_forward_curves(moneymaker):
         forward_curves_for_editing['Period']
     ).dt.strftime('%b-%Y')    
 
-    st.sidebar.dataframe(forward_curves_for_editing)
+    forward_curves_for_editing = st.sidebar.data_editor(forward_curves_for_editing)
+    moneymaker.forward_curves_filtered = forward_curves_for_editing
     # st.sidebar.header("Edit Forward Curves for SMP MH")
 
     # edited_curves_json = st.sidebar.text_area("Edit Forward Curves (JSON)", moneymaker.default_curves_json, height=200)
@@ -176,6 +177,11 @@ def main():
             allocations_table['SaleID'] = allocations_table['SaleID'].astype(
                 int).astype(str)
             st.dataframe(allocations_table)
+            col1, col2 = st.columns(2)
+            with col1:
+                moneymaker.plot_sankey('PurchasePlaceOfDelivery', 'SalePlaceOfDelivery', 'Flow from Purchase to Sale Places')
+            with col2:
+                moneymaker.plot_sankey('PurchaseAlphaName', 'SaleAlphaName', 'Flow between Purchase and Sale Companies')
 
 
             # Download link for allocations

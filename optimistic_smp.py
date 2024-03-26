@@ -2,6 +2,7 @@ import pandas as pd
 import pulp as pl
 from datetime import datetime
 import streamlit as st
+import plotly.graph_objects as go
 
 
 class OptimisticSMP:
@@ -391,6 +392,7 @@ class OptimisticSMP:
                 })
         
         allocations_df = pd.DataFrame(detailed_allocations)
+        self.allocations_df = allocations_df
         grouped_allocations = allocations_df.groupby(
             'SaleID')['AllocatedQuantity'].sum()
         for sale_id, total_allocated_quantity in grouped_allocations.items():
@@ -424,3 +426,45 @@ class OptimisticSMP:
                     f"Total Demand: {order['TotalDemand']}, Allocated Quantity: {order['AllocatedQuantity']}")
 
         return allocations_df, unfulfilled_sales, overfulfilled_sales
+    
+    def plot_sankey(self, source_column, target_column, title='Sankey Diagram'):
+        df = self.allocations_df
+
+        # Collect unique entities for both source and target
+        source_entities = df[source_column].unique().tolist()
+        target_entities = df[target_column].unique().tolist()
+
+        # Ensure unique labels across sources and targets by prefixing
+        source_labels = [f"{ent} Purchase" for ent in source_entities]
+        target_labels = [f"{ent} Sale" for ent in target_entities]
+
+        # Combine into a single list of labels for the diagram
+        labels = source_labels + target_labels
+
+        # Create a mapping from entity names to their indices in the labels list
+        entity_to_index = {name: idx for idx, name in enumerate(labels)}
+
+        # Generate sources and targets based on indices
+        sources = df[source_column].map(lambda x: entity_to_index[f"{x} Purchase"]).tolist()
+        targets = df[target_column].map(lambda x: entity_to_index[f"{x} Sale"]).tolist()
+
+        # Values for the flows
+        values = df['AllocatedQuantity'].tolist()
+
+        # Create and display the Sankey diagram
+        fig = go.Figure(data=[go.Sankey(
+            node=dict(
+                pad=15,
+                thickness=20,
+                line=dict(color="black", width=0.5),
+                label=labels,
+            ),
+            link=dict(
+                source=sources,
+                target=targets,
+                value=values,
+            ))])
+
+        fig.update_layout(title_text=title, font_size=10)
+        st.plotly_chart(fig)
+
