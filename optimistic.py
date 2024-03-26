@@ -4,6 +4,7 @@ import pulp as pl
 from datetime import datetime
 import streamlit as st
 import plotly.graph_objects as go
+import plotly.express as px
 
 class OptimisticSMP:
     def __init__(self, data_path):
@@ -299,16 +300,33 @@ class OptimisticSMP:
             return 0
 
 
-
     def _create_freight_rates_dict(self):
-        self.unique_pairs = set()
-        self.freight_rates_dict = {}
+        self.freight_rates_dict = {}  
         for _, sale_row in self.sales_df.iterrows():
+            sale_term = sale_row['DeliveryTermCode']
+            sale_destination = sale_row['PlaceOfDelivery']
+
             for _, stock_row in self.stocks_df.iterrows():
-                origin = stock_row['PlaceOfDelivery']
-                destination = sale_row['PlaceOfDelivery']
+                purchase_term = stock_row['DeliveryTermCode']
+                stock_origin = stock_row['PlaceOfDelivery']
+
+                # Combine purchase and sale external numbers for unique key
                 pair_key = (stock_row['ExternalNr'], sale_row['ExternalNr'])
-                self.freight_rates_dict[pair_key] = self._get_freight(origin, destination)
+                if purchase_term == 'Inventory':
+                    self.freight_rates_dict[pair_key] = 0
+                    continue
+
+                # Calculate purchase leg freight cost (origin based on purchase term)
+                purchase_origin = stock_origin if purchase_term in ('FOB', 'EXW') else sale_destination
+                purchase_freight_cost = self._get_freight(purchase_origin, sale_destination)
+
+                # Calculate sale leg freight cost (origin depends on sale term)
+                sale_origin = stock_origin if sale_term in ('CFR', 'CIF', 'FCA') else sale_destination
+                sale_freight_cost = self._get_freight(sale_origin, sale_destination)
+
+                total_freight_cost = purchase_freight_cost + sale_freight_cost 
+
+                self.freight_rates_dict[pair_key] = total_freight_cost  
         # if self.unique_pairs:
         #     st.write(set(self.unique_pairs)) 
          # st.write(self.sales_df['PlaceOfDelivery'])
@@ -519,32 +537,29 @@ class OptimisticSMP:
         return allocations_df, unfulfilled_sales, overfulfilled_sales
 
     def plot_sankey(self, source_column, target_column, title='Sankey Diagram'):
-        df = self.allocations_df
+        df = self.allocations_df.copy()  # Avoid modifying original DataFrame
 
-        # Collect unique entities for both source and target
+        # Sort by purchase date for both sides
+        df = df.sort_values(by=['PurchaseDate', source_column])  # Sort by purchase date, then source
+
+        # Collect unique entities
         source_entities = df[source_column].unique().tolist()
         target_entities = df[target_column].unique().tolist()
 
-        # Ensure unique labels across sources and targets by prefixing
-        source_labels = [f"{ent} Purchase" for ent in source_entities]
-        target_labels = [f"{ent} Sale" for ent in target_entities]
+        # Create prefixed labels with sorting applied within each category
+        source_labels = [f"{ent} Purchase" for ent in sorted(source_entities)]
+        target_labels = [f"{ent} Sale" for ent in sorted(target_entities)]
 
-        # Combine into a single list of labels for the diagram
+        # Combine and map labels to indices
         labels = source_labels + target_labels
-
-        # Create a mapping from entity names to their indices in the labels list
         entity_to_index = {name: idx for idx, name in enumerate(labels)}
 
-        # Generate sources and targets based on indices
-        sources = df[source_column].map(
-            lambda x: entity_to_index[f"{x} Purchase"]).tolist()
-        targets = df[target_column].map(
-            lambda x: entity_to_index[f"{x} Sale"]).tolist()
-
-        # Values for the flows
+        # Generate sources, targets, and values based on sorted DataFrame
+        sources = df[source_column].map(lambda x: entity_to_index[f"{x} Purchase"]).tolist()
+        targets = df[target_column].map(lambda x: entity_to_index[f"{x} Sale"]).tolist()
         values = df['AllocatedQuantity'].tolist()
 
-        # Create and display the Sankey diagram
+        # Create and display Sankey diagram with adjustments
         fig = go.Figure(data=[go.Sankey(
             node=dict(
                 pad=15,
@@ -558,5 +573,46 @@ class OptimisticSMP:
                 value=values,
             ))])
 
-        fig.update_layout(title_text=title, font_size=10)
+        fig.update_layout(title_text=title, font_size=10, width=600)
         st.plotly_chart(fig)
+
+    def plot_allocation_trends(self):
+        pass
+        # allocations_df = self.allocations_df.copy()
+
+        # # Convert dates to datetime format for plotting on x-axis
+        # allocations_df['PurchaseDate'] = pd.to_datetime(allocations_df['PurchaseDate'], format='%Y-%m-%d')
+        # allocations_df['SaleDate'] = pd.to_datetime(allocations_df['SaleDate'], format='%Y-%m-%d')
+        # # allocations_df = allocations_df.sort_values('PurchaseDate')
+        # allocations_df = allocations_df.set_index('PurchaseDate')
+        # # Resample and sum allocated quantities by month for purchases and sales
+        # purchase_allocations = (
+        #     allocations_df.groupby('PurchaseDate')['AllocatedQuantity']
+        #     .resample('M')
+        #     .sum()
+        #     .fillna(0)
+        #     .reset_index(drop=True)  # Add drop=True
+        # )
+
+        # allocations_df = allocations_df.set_index('SaleDate')
+        # sale_allocations = (
+        #     allocations_df.groupby('SaleDate')['AllocatedQuantity']
+        #     .resample('M')
+        #     .sum()
+        #     .fillna(0)
+        #     .reset_index(drop=True)
+        # )
+
+        # # Combine purchase and sale allocations on the same date
+        # allocation_trends = pd.merge(
+        #     purchase_allocations, sale_allocations, how='outer', left_on='PurchaseDate',  right_on='SaleDate'
+        # )
+
+        # # Plot stacked bar chart with plotly
+        # fig = px.bar(allocation_trends, x='PurchaseDate', y=['Purchase Allocated', 'Sale Allocated'], 
+        #             title='Allocation Trends by Purchase and Sale Date',
+        #             color_discrete=['blue', 'green'],  # Optional colors for clarity
+        #             barmode='stack')
+        # fig.update_layout(xaxis_title='Date', yaxis_title='Allocated Quantity')
+        # st.plotly_chart(fig)
+

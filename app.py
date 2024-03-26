@@ -156,9 +156,9 @@ def main():
 
     if uploaded_file is not None:
         display_and_edit_freight_rates(moneymaker)
+        display_and_edit_forward_curves(moneymaker)
         display_and_edit_country_region_mappings(moneymaker)
         # moneymaker.display_editable_forward_curves()
-        display_and_edit_forward_curves(moneymaker)
 
     if st.button('Run Optimisation', disabled=not file_uploaded):
         with st.spinner('Optimising...'):
@@ -179,11 +179,14 @@ def main():
             allocations_table['SaleID'] = allocations_table['SaleID'].astype(
                 int).astype(str)
             st.dataframe(allocations_table)
-            col1, col2 = st.columns(2)
+            col1, col2, col3 = st.columns(3)
             with col1:
                 moneymaker.plot_sankey('PurchasePlaceOfDelivery', 'SalePlaceOfDelivery', 'Flow from Purchase to Sale Places')
             with col2:
                 moneymaker.plot_sankey('PurchaseAlphaName', 'SaleAlphaName', 'Flow between Purchase and Sale Companies')
+            with col3:
+                moneymaker.plot_sankey('PurchaseDate', 'SaleDate', 'Flow between Purchase and Sale Dates')
+            # moneymaker.plot_allocation_trends()
 
 
             # Download link for allocations
@@ -202,7 +205,7 @@ def main():
                 st.subheader('Unfulfilled Sales Orders')
                 st.dataframe(pd.DataFrame(unfulfilled_sales))
 
-            st.write(moneymaker.forward_curves_filtered)
+            # st.write(moneymaker.forward_curves_filtered)
 
             # # Display overfulfilled sales orders
             # if overfulfilled_sales:
