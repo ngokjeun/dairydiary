@@ -200,7 +200,7 @@ class OptimisticSMP:
         self.P = self.purchase_prices_dict
         self.C = self.freight_rates_dict
         self.Q = self.max_qty_p_dict
-        self.D = self.demand_dict
+        self.D = self.demand_dict 
 
         self.purchase_to_seller = pd.Series(
             self.stocks_df.AlphaName.values, index=self.stocks_df.ExternalNr).to_dict()
