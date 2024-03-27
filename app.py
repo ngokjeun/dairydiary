@@ -42,7 +42,7 @@ def display_and_edit_freight_rates(moneymaker):
         return
 
 def main():
-    st.set_page_config(layout="wide", page_icon='🍼')
+    st.set_page_config(layout="wide", page_icon='loog.webp')
     st.markdown(
         "<h1 style='text-align: center; color: white;'>Dairy Diary 🐮</h1>",
         unsafe_allow_html=True,
