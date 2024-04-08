@@ -287,6 +287,8 @@ class OptimisticSMP:
         return mapping.get(location, location)
 
     def _get_freight(self, origin, destination):
+        if origin == destination:
+            return 40  # Inland freight cost
         # Simplified to work directly with the JSON structure
         origin_mapped = self.map_to_closest_freight_location(origin)
         destination_mapped = self.map_to_closest_freight_location(destination)
@@ -294,8 +296,8 @@ class OptimisticSMP:
             rate = self.freight_rates[origin_mapped][destination_mapped]
             return rate
         except KeyError:
-            print(
-                f"Missing Freight Rate: Origin - {origin_mapped}, Destination - {destination_mapped}")
+            # print(
+                # f"Missing Freight Rate: Origin - {origin_mapped}, Destination - {destination_mapped}")
             self.unique_pairs.add((origin_mapped, destination_mapped))
             return 0
 
