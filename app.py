@@ -167,7 +167,8 @@ def main():
                 moneymaker.fx_rates = fx_rates
 
             moneymaker.prepare_data()
-            st.write(moneymaker.forward_curves_filtered)
+            # st.write(moneymaker.forward_curves_filtered)
+            # st.write(moneymaker.grouped_stocks)
             moneymaker.setup_optimization()
             # Get DataFrame of allocations and lists of unfulfilled and overfulfilled sales orders
             allocations_df, unfulfilled_sales, overfulfilled_sales = moneymaker.get_allocations_df()

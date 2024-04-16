@@ -164,6 +164,7 @@ class OptimisticSMP:
         self.inventory_data['PlaceOfDelivery'] = self.inventory_data['Region']
         self.i = self.inventory_data[p.columns]
         all_stocks = pd.concat([self.i, p], axis=0)
+        st.write(all_stocks)
         self.grouped_stocks = self.process_data(all_stocks)
 
     def prepare_sales(self):
@@ -232,7 +233,7 @@ class OptimisticSMP:
         filtered_data['ExternalNr'] = filtered_data['ExternalNr'].astype(int)
         filtered_data = filtered_data.apply(self.money_changer_row, axis=1)
         filtered_data['CurrencyCode'] = 'USD'
-
+        filtered_data['Price'] = filtered_data['Price'].replace(0, self.forward_curves_filtered['Input Adjustment'][0])
         filtered_data['pq'] = filtered_data['Price'] * \
             filtered_data['Quantity (MT)']
 
