@@ -381,7 +381,7 @@ class OptimisticSMP:
         self._init_approved_flow()
 
     def prepare_data(self):
-        self.load_data_initial()
+        # self.load_data_initial()
         self.prepare_inventory_and_sales()
         self.purchases = list(self.purchase_prices_dict.keys())
 
@@ -425,9 +425,11 @@ class OptimisticSMP:
             prob += pl.lpSum([X[(i, j)] for j in self.sales if (i, j)
                              in X]) <= self.Q[i], f"Supply_{i}"
         # Demand Constraints: Each demand must be exactly met.
+            # Demand Constraints: Each demand must be exactly met or not exceeded.
         for j in self.sales:
             prob += pl.lpSum([X[(i, j)] for i in self.purchases if (i, j)
-                             in X]) == self.D[j], f"Demand_{j}"
+                            in X]) == self.D[j], f"Demand_{j}"
+
         prob.solve()
         # Printing the solution
         if pl.LpStatus[prob.status] == 'Optimal':

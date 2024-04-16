@@ -149,7 +149,7 @@ def main():
         st.sidebar.caption('Note: Rates available in the data file will be used, remaining use spot')
         moneymaker.past_fx = True
         # pass
-    if st.sidebar.checkbox('Use Forward Curves for Purchase, Sales Prices', value=False):
+    if st.sidebar.checkbox('Use Forward Curves for Purchase, Sales Prices', value=False) and file_uploaded:
         st.sidebar.caption('Note: Historical prices will be used for old trades, future prices will be MTM')
         moneymaker.MTM_prices = True
 
@@ -167,6 +167,7 @@ def main():
                 moneymaker.fx_rates = fx_rates
 
             moneymaker.prepare_data()
+            st.write(moneymaker.forward_curves_filtered)
             moneymaker.setup_optimization()
             # Get DataFrame of allocations and lists of unfulfilled and overfulfilled sales orders
             allocations_df, unfulfilled_sales, overfulfilled_sales = moneymaker.get_allocations_df()
