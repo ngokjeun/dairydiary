@@ -164,14 +164,14 @@ class OptimisticSMP:
         self.inventory_data['PlaceOfDelivery'] = self.inventory_data['Region']
         self.i = self.inventory_data[p.columns]
         all_stocks = pd.concat([self.i, p], axis=0)
-        st.write(all_stocks)
+        # st.write(all_stocks)
         self.grouped_stocks = self.process_data(all_stocks)
 
     def prepare_sales(self):
         self.sales_data['AlphaName'] = self.sales_data['Company Name'].str.strip()
         all_sales = self.sales_data[self.i.columns].loc[self.sales_data['ItemName']
                                                         == 'Skimmed Milk Powder']
-        # assume 0s in prices are intentional - refund for claim, etc.
+        
         # assume -2.9 in demand quantity is typo, should be 2.9 else it is a purchase under supply
         all_sales.replace(-2.9, 2.9, inplace=True)
         self.grouped_sales = self.process_data(all_sales)
@@ -199,8 +199,9 @@ class OptimisticSMP:
         market_curves = self.forward_curves_filtered[self.forward_curves_filtered['Market'] == market].copy()
         # st.write(market_curves)
         # Then proceed with finding the closest curve as before
+        # print(market_curves)
         if not market_curves.empty:
-            market_curves['Period'] = pd.to_datetime(market_curves['Period'])
+            market_curves['Period'] = pd.to_datetime(market_curves['Period'], format='%b-%Y')
             market_curves['Date Difference'] = market_curves['Period'].apply(
                 lambda x: abs((x - period_date).days))
             closest_curve = market_curves.sort_values(
@@ -303,8 +304,9 @@ class OptimisticSMP:
             return 0
 
 
-    def _create_freight_rates_dict(self):
+    def _create_freight_rates_dict(self): # add cost of carrying inventory
         self.freight_rates_dict = {}  
+        print(self.sales_df.head(), self.stocks_df.head())
         for _, sale_row in self.sales_df.iterrows():
             sale_term = sale_row['DeliveryTermCode']
             sale_destination = sale_row['PlaceOfDelivery']
@@ -426,7 +428,6 @@ class OptimisticSMP:
             prob += pl.lpSum([X[(i, j)] for j in self.sales if (i, j)
                              in X]) <= self.Q[i], f"Supply_{i}"
         # Demand Constraints: Each demand must be exactly met.
-            # Demand Constraints: Each demand must be exactly met or not exceeded.
         for j in self.sales:
             prob += pl.lpSum([X[(i, j)] for i in self.purchases if (i, j)
                             in X]) == self.D[j], f"Demand_{j}"
@@ -545,7 +546,8 @@ class OptimisticSMP:
         df = self.allocations_df.copy()  # Avoid modifying original DataFrame
 
         # Sort by purchase date for both sides
-        df = df.sort_values(by=['PurchaseDate', source_column])  # Sort by purchase date, then source
+        # Sort by purchase date, then source
+        df = df.sort_values(by=['PurchaseDate', source_column])
 
         # Collect unique entities
         source_entities = df[source_column].unique().tolist()
@@ -560,9 +562,17 @@ class OptimisticSMP:
         entity_to_index = {name: idx for idx, name in enumerate(labels)}
 
         # Generate sources, targets, and values based on sorted DataFrame
-        sources = df[source_column].map(lambda x: entity_to_index[f"{x} Purchase"]).tolist()
-        targets = df[target_column].map(lambda x: entity_to_index[f"{x} Sale"]).tolist()
+        sources = df[source_column].map(
+            lambda x: entity_to_index[f"{x} Purchase"]).tolist()
+        targets = df[target_column].map(
+            lambda x: entity_to_index[f"{x} Sale"]).tolist()
         values = df['AllocatedQuantity'].tolist()
+
+        # Calculate total allocated quantity for percentage calculations
+        total_quantity = sum(values)
+        # Include percentages in hover text by modifying the value list
+        value_texts = [
+            f"{v} MT ({(v / total_quantity * 100):.2f}%)" for v in values]
 
         # Create and display Sankey diagram with adjustments
         fig = go.Figure(data=[go.Sankey(
@@ -576,10 +586,12 @@ class OptimisticSMP:
                 source=sources,
                 target=targets,
                 value=values,
+                label=value_texts  # Label is shown in the hover by default
             ))])
 
-        fig.update_layout(title_text=title, font_size=10, width=550)
+        fig.update_layout(title_text=title, font_size=12, width=600)
         st.plotly_chart(fig)
+
 
     def plot_allocation_trends(self):
         pass
