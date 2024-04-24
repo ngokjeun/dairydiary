@@ -463,6 +463,58 @@ class OptimisticSMP:
         self.total_profit = total_profit
         self.X = X
 
+    def adjust_overfulfilled_sales(self, allocations_df):
+            # First, re-calculate the total allocated quantity for each sale ID to check current over-fulfillments
+        grouped_allocations = allocations_df.groupby('SaleID').agg({
+            'AllocatedQuantity': 'sum',
+            'SaleQuantity': 'first'  # Assuming the same SaleQuantity for each group
+        }).reset_index()
+
+        # Identify overfulfilled sales
+        overfulfilled = grouped_allocations[grouped_allocations['AllocatedQuantity']
+                                            > grouped_allocations['SaleQuantity']]
+
+        # Adjust the allocated quantities
+        for index, row in overfulfilled.iterrows():
+            sale_id = row['SaleID']
+            total_allocated = row['AllocatedQuantity']
+            total_demand = row['SaleQuantity']
+            excess = total_allocated - total_demand
+
+            # Find rows in the original df to adjust
+            sale_allocations = allocations_df[allocations_df['SaleID'] == sale_id]
+
+            # Proportional reduction
+            sale_allocations['AllocatedQuantity'] -= (
+                sale_allocations['AllocatedQuantity'] / total_allocated) * excess
+
+            # Ensure that we do not drop below zero due to floating point arithmetic issues
+            sale_allocations['AllocatedQuantity'] = sale_allocations['AllocatedQuantity'].clip(
+                lower=0)
+
+            # Update the main dataframe
+            allocations_df.loc[allocations_df['SaleID'] == sale_id,
+                            'AllocatedQuantity'] = sale_allocations['AllocatedQuantity']
+
+        # Re-check if any overfulfillment still exists
+        grouped_allocations_after = allocations_df.groupby('SaleID').agg({
+            'AllocatedQuantity': 'sum',
+            'SaleQuantity': 'first'
+        }).reset_index()
+        overfulfilled_after = grouped_allocations_after[grouped_allocations_after[
+            'AllocatedQuantity'] > grouped_allocations_after['SaleQuantity'] + 0.01]
+
+        # if not overfulfilled_after.empty:
+        #     print("Adjustment incomplete, further checks needed.")
+        # else:
+        #     print("All overfulfillments adjusted.")
+
+        # Round numerical columns to 2 decimal places
+        allocations_df = allocations_df.round(2)
+
+        return allocations_df
+
+
     def get_allocations_df(self):
         self.stocks_df['PlaceOfDelivery'] = self.stocks_df['PlaceOfDelivery'].apply(
             lambda x: self.country_region_mappings.get(x, x))
@@ -481,7 +533,7 @@ class OptimisticSMP:
         # Iterate through each decision variable in self.X
         for (purchase_id, sale_id), variable in self.X.items():
             quantity = variable.varValue  # Get the allocated quantity from the decision variable
-            if quantity > 0:  # Process only allocations with a positive quantity
+            if quantity:  # Process only allocations with a positive quantity
                 purchase_details = stocks_augmented.loc[stocks_augmented['ExternalNr']
                                                         == purchase_id].iloc[0]
                 sale_details = sales_augmented.loc[sales_augmented['ExternalNr']
@@ -507,20 +559,22 @@ class OptimisticSMP:
                 })
 
         allocations_df = pd.DataFrame(detailed_allocations)
+        # Adjust overfulfilled sales
+        allocations_df = self.adjust_overfulfilled_sales(allocations_df)
         self.allocations_df = allocations_df
         grouped_allocations = allocations_df.groupby(
             'SaleID')['AllocatedQuantity'].sum()
         for sale_id, total_allocated_quantity in grouped_allocations.items():
             total_demand = allocations_df.loc[allocations_df['SaleID']
                                               == sale_id, 'SaleQuantity'].iloc[0]
-            if total_allocated_quantity < total_demand:
+            if total_allocated_quantity < total_demand -0.01:
                 unfulfilled_sales.append({
                     'SaleID': sale_id,
                     'SaleAlphaName': allocations_df.loc[allocations_df['SaleID'] == sale_id, 'SaleAlphaName'].iloc[0],
                     'TotalDemand': total_demand,
                     'AllocatedQuantity': total_allocated_quantity
                 })
-            elif total_allocated_quantity > total_demand + 1:
+            elif total_allocated_quantity > total_demand + 0.01:
                 overfulfilled_sales.append({
                     'SaleID': sale_id,
                     'SaleAlphaName': allocations_df.loc[allocations_df['SaleID'] == sale_id, 'SaleAlphaName'].iloc[0],
@@ -589,7 +643,7 @@ class OptimisticSMP:
                 label=value_texts  # Label is shown in the hover by default
             ))])
 
-        fig.update_layout(title_text=title, font_size=12, width=600)
+        fig.update_layout(title_text=title, font_size=12, width=400)
         st.plotly_chart(fig)
 
 
