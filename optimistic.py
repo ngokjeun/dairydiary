@@ -645,45 +645,4 @@ class OptimisticSMP:
 
         fig.update_layout(title_text=title, font_size=12, width=400)
         st.plotly_chart(fig)
-
-
-    def plot_allocation_trends(self):
-        pass
-        # allocations_df = self.allocations_df.copy()
-
-        # # Convert dates to datetime format for plotting on x-axis
-        # allocations_df['PurchaseDate'] = pd.to_datetime(allocations_df['PurchaseDate'], format='%Y-%m-%d')
-        # allocations_df['SaleDate'] = pd.to_datetime(allocations_df['SaleDate'], format='%Y-%m-%d')
-        # # allocations_df = allocations_df.sort_values('PurchaseDate')
-        # allocations_df = allocations_df.set_index('PurchaseDate')
-        # # Resample and sum allocated quantities by month for purchases and sales
-        # purchase_allocations = (
-        #     allocations_df.groupby('PurchaseDate')['AllocatedQuantity']
-        #     .resample('M')
-        #     .sum()
-        #     .fillna(0)
-        #     .reset_index(drop=True)  # Add drop=True
-        # )
-
-        # allocations_df = allocations_df.set_index('SaleDate')
-        # sale_allocations = (
-        #     allocations_df.groupby('SaleDate')['AllocatedQuantity']
-        #     .resample('M')
-        #     .sum()
-        #     .fillna(0)
-        #     .reset_index(drop=True)
-        # )
-
-        # # Combine purchase and sale allocations on the same date
-        # allocation_trends = pd.merge(
-        #     purchase_allocations, sale_allocations, how='outer', left_on='PurchaseDate',  right_on='SaleDate'
-        # )
-
-        # # Plot stacked bar chart with plotly
-        # fig = px.bar(allocation_trends, x='PurchaseDate', y=['Purchase Allocated', 'Sale Allocated'], 
-        #             title='Allocation Trends by Purchase and Sale Date',
-        #             color_discrete=['blue', 'green'],  # Optional colors for clarity
-        #             barmode='stack')
-        # fig.update_layout(xaxis_title='Date', yaxis_title='Allocated Quantity')
-        # st.plotly_chart(fig)
-
+        
